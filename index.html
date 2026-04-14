@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Skaner</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#000000">
+    
+    <script src="html5-qrcode.min.js"></script>
+    <script src="xlsx.full.min.js"></script>
+    
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; padding: 20px; background: #f0f2f5; transition: background-color 0.1s; margin: 0; min-height: 100vh;}
+        
+        #reader-wrapper { position: relative; width: 100%; max-width: 500px; border-radius: 10px; overflow: hidden; background: #000; margin-top: 10px; }
+        #reader { width: 100%; }
+        
+        #scanner-overlay {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 280px; height: 120px; border: 2px solid rgba(255, 255, 255, 0.7);
+            border-radius: 8px; pointer-events: none; box-shadow: 0 0 0 1000px rgba(0, 0, 0, 0.4); z-index: 10;
+        }
+        #scanner-overlay::before, #scanner-overlay::after {
+            content: ""; position: absolute; width: 20px; height: 20px; border: 4px solid #007bff;
+        }
+        #scanner-overlay::before { top: -4px; left: -4px; border-right: 0; border-bottom: 0; border-radius: 8px 0 0 0; }
+        #scanner-overlay::after { bottom: -4px; right: -4px; border-left: 0; border-top: 0; border-radius: 0 0 8px 0; }
+
+        #dashboard { margin-top: 20px; padding: 20px; background: white; border-radius: 10px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 90%; max-width: 400px; }
+        #status { color: #888; font-size: 0.9em; margin-top: 15px; font-weight: bold; height: 20px;}
+        
+        .counter { font-size: 1.5em; color: #333; margin: 10px 0; }
+        .last-scan { color: #28a745; font-weight: bold; font-size: 1.2em; letter-spacing: 1px; min-height: 25px; margin-bottom: 15px;}
+        
+        /* Style przycisków */
+        .btn-group { display: flex; gap: 10px; flex-direction: column; }
+        button { padding: 15px; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 1em; width: 100%; box-sizing: border-box; transition: background 0.2s;}
+        
+        .btn-excel { background: #28a745; }
+        .btn-excel:hover { background: #218838; }
+        
+        .btn-undo { background: #ffc107; color: #333 ;padding: 8px; font-size: 0.9em; margin-top: 10px;}
+        .btn-undo:hover { background: #e0a800; }
+
+        .btn-clear { background: #dc3545; padding: 8px; font-size: 0.9em; margin-top: 10px;}
+        .btn-clear:hover { background: #c82333; }
+    </style>
+</head>
+<body>
+    
+    <div id="reader-wrapper">
+        <div id="reader"></div>
+        <div id="scanner-overlay"></div>
+    </div>
+
+    <div id="status">Skaner aktywny...</div>
+
+    <div id="dashboard">
+        <div class="counter">Zeskanowano: <strong id="scan-count">0</strong> szt.</div>
+        <div class="last-scan" id="last-scan-result">---</div>
+        
+        <div class="btn-group">
+            <button class="btn-excel" onclick="exportToExcel()">Zapisz plik Excel z kodami</button>
+            <h2>  </h2>
+            <button class="btn-undo" onclick="undoLastScan()">Usuń ostatnio zeskanowany kod</button>
+            <h2>  </h2>
+            <button class="btn-clear" onclick="clearData()">Wyzeruj licznik i rozpocznij nowy plik Excel</button>
+        </div>
+    </div>
+
+    <script>
+        const html5QrCode = new Html5Qrcode("reader");
+        const statusText = document.getElementById('status');
+        const countText = document.getElementById('scan-count');
+        const lastScanText = document.getElementById('last-scan-result');
+        
+        let scannedCodes = [];
+        let isPaused = false;
+
+        // Wczytywanie danych z pamięci przy uruchomieniu aplikacji
+        function loadSavedData() {
+            const saved = localStorage.getItem('mojeSkany15');
+            if (saved) {
+                scannedCodes = JSON.parse(saved);
+                updateUI();
+            }
+        }
+
+        // Zapisywanie danych do pamięci telefonu
+        function saveToMemory() {
+            localStorage.setItem('mojeSkany15', JSON.stringify(scannedCodes));
+        }
+
+        // Aktualizacja tekstów na ekranie
+        function updateUI() {
+            countText.innerText = scannedCodes.length;
+            if(scannedCodes.length > 0) {
+                lastScanText.innerText = scannedCodes[scannedCodes.length - 1][0];
+            } else {
+                lastScanText.innerText = "---";
+            }
+        }
+
+const config = { 
+    fps: 25, // Zwiększamy klatkaż dla płynniejszej analizy
+    qrbox: { width: 300, height: 100 }, // Nieco większy obszar pomaga nowym matrycom
+    aspectRatio: 1.777778,
+    // Dodatkowe wskazówki dla kamery:
+    videoConstraints: {
+        focusMode: "continuous", // Wymusza ciągły autofocus
+        facingMode: "environment"
+    }
+};
+
+        function startScanner() {
+            html5QrCode.start({ facingMode: "environment" }, config, (text) => {
+                if (isPaused) return;
+
+                if (/^\d{15}$/.test(text)) {
+                    processValidCode(text);
+                } else {
+                    statusText.innerText = "Niepoprawny kod (" + text.length + ")";
+                    statusText.style.color = "red";
+                }
+            }).catch(err => {
+                statusText.innerText = "Błąd kamery. Wymagany HTTPS.";
+            });
+        }
+
+        function processValidCode(code) {
+            isPaused = true;
+            statusText.innerText = "ZAPISANO!";
+            statusText.style.color = "green";
+
+            // Dodaj do tablicy i zapisz w pamięci
+            scannedCodes.push([code]);
+            saveToMemory();
+            updateUI();
+
+            document.body.style.backgroundColor = '#19ff19';
+            if (navigator.vibrate) navigator.vibrate(200);
+
+            setTimeout(() => {
+                document.body.style.backgroundColor = '#f0f2f5';
+                statusText.innerText = "Skaner aktywny...";
+                statusText.style.color = "#888";
+                isPaused = false;
+            }, 1500);
+        }
+
+        // NOWA FUNKCJA - Cofanie ostatniego skanu
+        function undoLastScan() {
+            if (scannedCodes.length === 0) {
+                alert("Nie ma żadnych kodów do usunięcia!");
+                return;
+            }
+
+            // Pobierz ostatni kod z tablicy
+            const lastCode = scannedCodes[scannedCodes.length - 1][0];
+
+            // Zapytaj o potwierdzenie z numerem kodu
+            if (confirm(`Czy usunąć ostatnio zeskanowany kod o nr:\n\n${lastCode} ?`)) {
+                // Usuwa ostatni element z tablicy
+                scannedCodes.pop(); 
+                // Zapisuje nowy stan bez tego elementu do pamięci telefonu
+                saveToMemory(); 
+                // Aktualizuje licznik i wyświetlany poprzedni kod na ekranie
+                updateUI(); 
+                
+                // Krótki komunikat zwrotny
+                statusText.innerText = "Usunięto pomyślnie.";
+                statusText.style.color = "#dc3545";
+                
+                // Powrót komunikatu "Skaner aktywny" po 1.5 sekundy
+                setTimeout(() => {
+                    statusText.innerText = "Skaner aktywny...";
+                    statusText.style.color = "#888";
+                }, 1500);
+            }
+        }
+
+function exportToExcel() {
+    if (scannedCodes.length === 0) {
+        alert("Brak danych do pobrania!");
+        return;
+    }
+
+    const worksheet = XLSX.utils.aoa_to_sheet(scannedCodes);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Zeskanowane Kody");
+
+    // POPRAWIONY FORMAT DATY I GODZINY
+    const date = new Date();
+    const year = date.getFullYear();
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+    const hours = date.getHours().toString().padStart(2, '0');
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    
+    const filename = `skany_${year}-${month}-${day}_${hours}-${minutes}.xlsx`;
+
+            if(confirm(`Plik zostanie zapisany w folderze "Pobrane" (Downloads).\nNazwa pliku:\n${filename}`)) {
+
+            XLSX.writeFile(workbook, filename);
+            }
+}
+
+        function clearData() {
+            if(confirm("Czy na pewno chcesz usunąć WSZYSTKIE zeskanowane kody z pamięci? Upewnij się, że pobrałeś plik Excel!")) {
+                scannedCodes = [];
+                localStorage.removeItem('mojeSkany15');
+                updateUI();
+            }
+        }
+
+        // Start
+        loadSavedData();
+        startScanner();
+    </script>
+</body>
+</html>
