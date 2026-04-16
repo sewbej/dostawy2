@@ -37,6 +37,13 @@
         .btn-group { display: flex; gap: 10px; flex-direction: column; }
         button { padding: 15px; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 1em; width: 100%; box-sizing: border-box; transition: background 0.2s;}
         
+        .btn-reg { background: #007bff; margin-bottom: 0px; }
+        .btn-reg:hover { background: #0056b3; }
+
+        /* WYŚWIETLANIE STATUSU I NR REJ. */
+        #reg-display { font-size: 1.1em; color: #007bff; font-weight: bold; display: none; margin-bottom: 10px; line-height: 1.4; }
+        .data-label { color: #555; font-weight: normal; font-size: 0.9em;}
+
         .btn-excel { background: #28a745; }
         .btn-excel:hover { background: #218838; }
         
@@ -45,6 +52,28 @@
 
         .btn-clear { background: #dc3545; padding: 8px; font-size: 0.9em; margin-top: 10px;}
         .btn-clear:hover { background: #c82333; }
+
+        /* NOWE: Style dla własnego wyskakującego okienka (Modal) */
+        .modal-overlay {
+            display: none; position: fixed; z-index: 100; left: 0; top: 0; 
+            width: 100%; height: 100%; background-color: rgba(0,0,0,0.6);
+        }
+        .modal-content {
+            background-color: #fff; margin: 30% auto; padding: 25px; 
+            width: 85%; max-width: 320px; border-radius: 12px; box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            text-align: center; display: flex; flex-direction: column;
+        }
+        .modal-content h3 { margin-top: 0; color: #333; }
+        
+        .radio-group { display: flex; justify-content: space-around; margin: 20px 0; font-size: 1.2em; font-weight: bold;}
+        .radio-label { display: flex; align-items: center; gap: 8px; cursor: pointer; color: #333; }
+        .radio-label input { transform: scale(1.3); }
+
+        #modal-input { 
+            width: 100%; padding: 12px; margin-bottom: 20px; font-size: 1.2em; 
+            text-transform: uppercase; box-sizing: border-box; text-align: center;
+            border: 2px solid #ccc; border-radius: 6px;
+        }
     </style>
 </head>
 <body>
@@ -61,11 +90,38 @@
         <div class="last-scan" id="last-scan-result">---</div>
         
         <div class="btn-group">
+            <button class="btn-reg" onclick="openModal()">Wpisz status i nr rej.</button>
+            
+            <div id="reg-display">
+                <span class="data-label">Status:</span> <span id="display-status">---</span><br>
+                <span class="data-label">Nr rej:</span> <span id="display-reg">---</span>
+            </div>
+
             <button class="btn-excel" onclick="exportToExcel()">Zapisz plik Excel z kodami</button>
             <h2>  </h2>
             <button class="btn-undo" onclick="undoLastScan()">Usuń ostatnio zeskanowany kod</button>
             <h2>  </h2>
             <button class="btn-clear" onclick="clearData()">Wyzeruj licznik i rozpocznij nowy plik Excel</button>
+        </div>
+    </div>
+
+    <div id="customModal" class="modal-overlay">
+        <div class="modal-content">
+            <h3>Wprowadź dane</h3>
+            
+            <div class="radio-group">
+                <label class="radio-label">
+                    <input type="radio" name="statusWybor" value="DOBRE" checked> DOBRE
+                </label>
+                <label class="radio-label">
+                    <input type="radio" name="statusWybor" value="OTWARTE"> OTWARTE
+                </label>
+            </div>
+            
+            <input type="text" id="modal-input" placeholder="Nr rejestracyjny">
+            
+            <button class="btn-reg" onclick="saveModalData()">Zatwierdź i zamknij</button>
+            <button class="btn-undo" onclick="closeModal()">Anuluj</button>
         </div>
     </div>
 
@@ -77,22 +133,36 @@
         
         let scannedCodes = [];
         let isPaused = false;
+        
+        // Zmienne na status i rejestrację
+        let currentRegNumber = ""; 
+        let currentStatus = "DOBRE"; 
 
-        // Wczytywanie danych z pamięci przy uruchomieniu aplikacji
+        // Wczytywanie danych z pamięci
         function loadSavedData() {
             const saved = localStorage.getItem('mojeSkany15');
             if (saved) {
                 scannedCodes = JSON.parse(saved);
                 updateUI();
             }
+            
+            const savedReg = localStorage.getItem('nrRejestracyjny');
+            const savedStatus = localStorage.getItem('statusKodu');
+            
+            if (savedReg !== null) currentRegNumber = savedReg;
+            if (savedStatus !== null) currentStatus = savedStatus;
+            
+            if(savedReg || savedStatus) {
+                updateDisplayData();
+            }
         }
 
-        // Zapisywanie danych do pamięci telefonu
+        // Zapisywanie kodów do pamięci
         function saveToMemory() {
             localStorage.setItem('mojeSkany15', JSON.stringify(scannedCodes));
         }
 
-        // Aktualizacja tekstów na ekranie
+        // Aktualizacja kodów na ekranie
         function updateUI() {
             countText.innerText = scannedCodes.length;
             if(scannedCodes.length > 0) {
@@ -102,16 +172,54 @@
             }
         }
 
-const config = { 
-    fps: 25, // Zwiększamy klatkaż dla płynniejszej analizy
-    qrbox: { width: 340, height: 120 }, // Nieco większy obszar pomaga nowym matrycom
-    aspectRatio: 1.2,
-    // Dodatkowe wskazówki dla kamery:
-    videoConstraints: {
-        focusMode: "continuous", // Wymusza ciągły autofocus
-        facingMode: "environment"
-    }
-};
+        // Aktualizacja bloku informacyjnego z nr rej i statusem
+        function updateDisplayData() {
+            document.getElementById('display-status').innerText = currentStatus;
+            document.getElementById('display-reg').innerText = currentRegNumber || "Brak";
+            document.getElementById('reg-display').style.display = 'block';
+        }
+
+        // FUNKCJE MODALA (Wyskakującego okna)
+        function openModal() {
+            document.getElementById('customModal').style.display = 'block';
+            document.getElementById('modal-input').value = currentRegNumber;
+            
+            // Zaznaczanie odpowiedniego radio buttona
+            const radios = document.getElementsByName('statusWybor');
+            for(let r of radios) {
+                if(r.value === currentStatus) r.checked = true;
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('customModal').style.display = 'none';
+        }
+
+        function saveModalData() {
+            // Pobieranie statusu z radio buttonów
+            const radios = document.getElementsByName('statusWybor');
+            for(let r of radios) {
+                if(r.checked) currentStatus = r.value;
+            }
+            
+            // Pobieranie wpisanego tekstu
+            const inputVal = document.getElementById('modal-input').value;
+            currentRegNumber = inputVal.trim().toUpperCase();
+
+            // Zapis w pamięci telefonu
+            localStorage.setItem('nrRejestracyjny', currentRegNumber);
+            localStorage.setItem('statusKodu', currentStatus);
+
+            // Odśwież UI i zamknij okno
+            updateDisplayData();
+            closeModal();
+        }
+
+        const config = { 
+            fps: 15, 
+            qrbox: { width: 280, height: 120 },
+            aspectRatio: 1.0
+        };
 
         function startScanner() {
             html5QrCode.start({ facingMode: "environment" }, config, (text) => {
@@ -133,7 +241,6 @@ const config = {
             statusText.innerText = "ZAPISANO!";
             statusText.style.color = "green";
 
-            // Dodaj do tablicy i zapisz w pamięci
             scannedCodes.push([code]);
             saveToMemory();
             updateUI();
@@ -149,30 +256,22 @@ const config = {
             }, 1500);
         }
 
-        // NOWA FUNKCJA - Cofanie ostatniego skanu
         function undoLastScan() {
             if (scannedCodes.length === 0) {
                 alert("Nie ma żadnych kodów do usunięcia!");
                 return;
             }
 
-            // Pobierz ostatni kod z tablicy
             const lastCode = scannedCodes[scannedCodes.length - 1][0];
 
-            // Zapytaj o potwierdzenie z numerem kodu
             if (confirm(`Czy usunąć ostatnio zeskanowany kod o nr:\n\n${lastCode} ?`)) {
-                // Usuwa ostatni element z tablicy
                 scannedCodes.pop(); 
-                // Zapisuje nowy stan bez tego elementu do pamięci telefonu
                 saveToMemory(); 
-                // Aktualizuje licznik i wyświetlany poprzedni kod na ekranie
                 updateUI(); 
                 
-                // Krótki komunikat zwrotny
                 statusText.innerText = "Usunięto pomyślnie.";
                 statusText.style.color = "#dc3545";
                 
-                // Powrót komunikatu "Skaner aktywny" po 1.5 sekundy
                 setTimeout(() => {
                     statusText.innerText = "Skaner aktywny...";
                     statusText.style.color = "#888";
@@ -180,36 +279,46 @@ const config = {
             }
         }
 
-function exportToExcel() {
-    if (scannedCodes.length === 0) {
-        alert("Brak danych do pobrania!");
-        return;
-    }
+        function exportToExcel() {
+            if (scannedCodes.length === 0) {
+                alert("Brak danych do pobrania!");
+                return;
+            }
 
-    const worksheet = XLSX.utils.aoa_to_sheet(scannedCodes);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Zeskanowane Kody");
+            const worksheet = XLSX.utils.aoa_to_sheet(scannedCodes);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Zeskanowane Kody");
 
-    // POPRAWIONY FORMAT DATY I GODZINY
-    const date = new Date();
-    const year = date.getFullYear();
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const day = date.getDate().toString().padStart(2, '0');
-    const hours = date.getHours().toString().padStart(2, '0');
-    const minutes = date.getMinutes().toString().padStart(2, '0');
-    
-    const filename = `skany_${year}-${month}-${day}_${hours}-${minutes}.xlsx`;
+            const date = new Date();
+            const year = date.getFullYear();
+            const month = (date.getMonth() + 1).toString().padStart(2, '0');
+            const day = date.getDate().toString().padStart(2, '0');
+            const hours = date.getHours().toString().padStart(2, '0');
+            const minutes = date.getMinutes().toString().padStart(2, '0');
+            
+            // BUDOWANIE NAZWY PLIKU: uwzględnia STATUS oraz NR REJ (jeśli jest podany)
+            let filename = `skany_${currentStatus}_`;
+            if (currentRegNumber !== "") {
+                filename += `${currentRegNumber}_`;
+            }
+            filename += `${year}-${month}-${day}_${hours}-${minutes}.xlsx`;
 
             if(confirm(`Plik zostanie zapisany w folderze "Pobrane" (Downloads).\nNazwa pliku:\n${filename}`)) {
-
-            XLSX.writeFile(workbook, filename);
+                XLSX.writeFile(workbook, filename);
             }
-}
+        }
 
         function clearData() {
             if(confirm("Czy na pewno chcesz usunąć WSZYSTKIE zeskanowane kody z pamięci? Upewnij się, że pobrałeś plik Excel!")) {
                 scannedCodes = [];
+                currentRegNumber = ""; 
+                currentStatus = "DOBRE"; // Powrót do domyślnego
+                
                 localStorage.removeItem('mojeSkany15');
+                localStorage.removeItem('nrRejestracyjny');
+                localStorage.removeItem('statusKodu');
+                
+                document.getElementById('reg-display').style.display = 'none'; 
                 updateUI();
             }
         }
